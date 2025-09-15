@@ -1,0 +1,272 @@
+赫兹生物技术（成都）有限公司
+嵌入式实习生面试题
+要求​
+请使用 C 或 RUST 语言编程解答下述问题，并把代码和解题思路上传至个人 github 仓库，把 github 仓库地址反馈给招聘人，你有 3 天的时间解答下述问题。
+问题描述​
+给定一个经过编码的字符串 s，请你实现一个算法来解码它。编码规则为 k[encoded_string]，表示方括号内部的 encoded_string正好重复 k 次。其中 k是一个正整数，并且输入字符串总是有效的；所有括号都是匹配的，且数字只用来表示重复次数 k。例如：
+输入："3[a]2[bc]"，输出："aaabcbc"。
+输入："3[a2[c]]"，输出："accaccacc"（即 "a" + "cc"重复3次，故为 "acc" + "acc" + "acc"）。
+输入："2[abc]3[cd]ef"，输出："abcabccdcdcdef"。
+​注意​：
+你可以认为原始数据不包含数字，所有的数字只表示重复的次数 k。例如，不会出现像 3a或 2[4]这样的输入。
+所有输入的字符串中，方括号都是匹配的。
+生成的输出字符串不会包含括号和数字，只包含字母。
+数据结构：
+
+数字栈 (count_stack)：一个 int 类型的动态数组。
+字符串栈 (string_stack)：一个 char* 类型的动态数组，每个元素都是一个指向堆上分配的字符串的指针。
+当前字符串 (current_string)：一个 char* 指针，指向堆上分配的内存，用于动态构建当前处理的字符串。为了高效地追加字符，我们还需要跟踪它的容量 (current_capacity) 和当前长度 (current_len)。
+当前数字 (current_num)：一个 int 变量。
+辅助函数：
+
+append_char：一个辅助函数，用于向 current_string 中追加一个字符。如果当前字符串的容量不足，它会使用 realloc 来扩容。
+free_stack：一个辅助函数，用于在程序结束前释放栈和栈内所有字符串指针占用的内存，防止内存泄漏。
+主逻辑 (decodeString)：
+
+初始化：为两个栈分配初始内存，并初始化所有变量。
+遍历输入字符串：逐个字符处理，逻辑与 Python 版本基本一致，但需要调用 append_char 来处理字母，并手动管理栈的 push 和 pop 操作。
+处理 ]：这是最复杂的部分。需要从数字栈弹出 num，从字符串栈弹出 prev_string。然后，我们需要在堆上分配一块新的内存来存储 prev_string + num * current_string 的结果，计算好新长度后，使用 strcpy 和 strcat（或 memcpy）来完成拼接。最后，要记得释放旧的 current_string 和 prev_string 的内存。
+清理和返回：遍历结束后，current_string 就是最终结果。我们需要释放两个栈的内存，然后返回 current_string。注意：调用者在使用完返回的字符串后，有责任 free() 它。
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+
+// --- 宏定义 ---
+#define INITIAL_STACK_CAPACITY 16
+#define INITIAL_STRING_CAPACITY 16
+
+// --- 辅助函数 ---
+
+/**
+ * @brief 向动态字符串中追加一个字符，必要时自动扩容。
+ * @param str_ptr 指向字符串指针的指针。
+ * @param len 指向字符串当前长度的指针。
+ * @param capacity 指向字符串当前容量的指针。
+ * @param c 要追加的字符。
+ */
+void append_char(char** str_ptr, size_t* len, size_t* capacity, char c) {
+    if (*len >= *capacity) {
+        // 容量不足，进行扩容 (例如，翻倍)
+        *capacity *= 2;
+        // 安全地使用 realloc，防止内存泄漏
+        char* temp_ptr = (char*)realloc(*str_ptr, *capacity * sizeof(char));
+        if (!temp_ptr) {
+            perror("Failed to reallocate memory for string");
+            free(*str_ptr); // realloc失败，释放原始内存块
+            exit(EXIT_FAILURE);
+        }
+        *str_ptr = temp_ptr;
+    }
+    (*str_ptr)[(*len)++] = c;
+    (*str_ptr)[*len] = '\0'; // 保持字符串以 '\0' 结尾
+}
+
+/**
+ * @brief 从标准输入读取一行文本到动态分配的字符串中。
+ * @return 指向包含输入文本的字符串的指针，如果发生错误或输入为空则返回NULL。
+ *         调用者负责释放返回的字符串。
+ */
+char* read_input_line() {
+    size_t capacity = INITIAL_STRING_CAPACITY;
+    size_t len = 0;
+    char* buffer = (char*)malloc(capacity * sizeof(char));
+    if (!buffer) {
+        perror("Failed to allocate memory for input buffer");
+        return NULL;
+    }
+
+    printf("请输入要解码的字符串 (直接按回车退出):\n> ");
+
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF) {
+        // 如果缓冲区已满（需要为 '\0' 预留一个位置）
+        if (len >= capacity - 1) {
+            capacity *= 2;
+            // 安全地使用 realloc
+            char* temp_ptr = (char*)realloc(buffer, capacity * sizeof(char));
+            if (!temp_ptr) {
+                perror("Failed to reallocate memory for input buffer");
+                free(buffer); // 释放原始内存
+                return NULL;
+            }
+            buffer = temp_ptr;
+        }
+        buffer[len++] = (char)c;
+    }
+
+    // 如果发生EOF且未读取任何字符，或用户直接按回车
+    if (len == 0) {
+        free(buffer);
+        return NULL;
+    }
+
+    buffer[len] = '\0'; // 确保字符串以 '\0' 结尾
+    return buffer;
+}
+
+
+// --- 核心算法函数 ---
+
+/**
+ * @brief 解码经过 k[encoded_string] 规则编码的字符串。
+ * @param s 指向编码后字符串的指针。
+ * @return 指向解码后字符串的指针。调用者负责释放该字符串。
+ */
+char* decodeString(char* s) {
+    // --- 初始化 ---
+    // 使用 size_t 替代 int 以避免类型转换警告和潜在的数据丢失
+    size_t count_stack_capacity = INITIAL_STACK_CAPACITY;
+    size_t string_stack_capacity = INITIAL_STRING_CAPACITY;
+    size_t count_stack_top = (size_t)-1; // 初始化为-1的size_t表示空栈
+    size_t string_stack_top = (size_t)-1;
+
+    int* count_stack = (int*)malloc(count_stack_capacity * sizeof(int));
+    char** string_stack = (char**)malloc(string_stack_capacity * sizeof(char*));
+    if (!count_stack || !string_stack) {
+        perror("Failed to allocate memory for stacks");
+        free(count_stack);
+        free(string_stack);
+        exit(EXIT_FAILURE);
+    }
+
+    char* current_string = (char*)malloc(INITIAL_STRING_CAPACITY * sizeof(char));
+    if (!current_string) {
+        perror("Failed to allocate memory for current_string");
+        free(count_stack);
+        free(string_stack);
+        exit(EXIT_FAILURE);
+    }
+    current_string[0] = '\0';
+    size_t current_len = 0;
+    size_t current_capacity = INITIAL_STRING_CAPACITY;
+    int current_num = 0;
+
+    // --- 遍历字符串 ---
+    for (size_t i = 0; s[i] != '\0'; i++) {
+        char c = s[i];
+        if (isdigit(c)) {
+            current_num = current_num * 10 + (c - '0');
+        }
+        else if (c == '[') {
+            // 压入数字栈
+            if (count_stack_top >= count_stack_capacity - 1) {
+                count_stack_capacity *= 2;
+                int* temp_ptr = (int*)realloc(count_stack, count_stack_capacity * sizeof(int));
+                if (!temp_ptr) {
+                    perror("Failed to reallocate count_stack");
+                    free(count_stack);
+                    // 更完善的错误恢复应释放所有已分配内存，这里为简洁直接退出
+                    exit(EXIT_FAILURE);
+                }
+                count_stack = temp_ptr;
+            }
+            count_stack[++count_stack_top] = current_num;
+            current_num = 0;
+
+            // 压入字符串栈
+            if (string_stack_top >= string_stack_capacity - 1) {
+                string_stack_capacity *= 2;
+                char** temp_ptr = (char**)realloc(string_stack, string_stack_capacity * sizeof(char*));
+                if (!temp_ptr) {
+                    perror("Failed to reallocate string_stack");
+                    free(string_stack);
+                    exit(EXIT_FAILURE);
+                }
+                string_stack = temp_ptr;
+            }
+            string_stack[++string_stack_top] = current_string;
+
+            // 重置 current_string
+            current_string = (char*)malloc(INITIAL_STRING_CAPACITY * sizeof(char));
+            if (!current_string) {
+                perror("Failed to allocate memory for new current_string");
+                exit(EXIT_FAILURE);
+            }
+            current_string[0] = '\0';
+            current_len = 0;
+            current_capacity = INITIAL_STRING_CAPACITY;
+        }
+        else if (c == ']') {
+            // 弹出数字和字符串
+            int num = count_stack[count_stack_top--];
+            char* prev_string = string_stack[string_stack_top--];
+
+            // 计算新字符串的长度
+            size_t prev_len = strlen(prev_string);
+            size_t repeated_len = strlen(current_string);
+            size_t new_len = prev_len + num * repeated_len;
+
+            // 分配新内存
+            char* new_string = (char*)malloc((new_len + 1) * sizeof(char));
+            if (!new_string) {
+                perror("Failed to allocate memory for new_string");
+                exit(EXIT_FAILURE);
+            }
+
+            // 拼接字符串: prev_string + num * current_string
+            // 使用 memcpy 替代 strcpy/strcat，更安全高效
+            memcpy(new_string, prev_string, prev_len);
+            for (int j = 0; j < num; j++) {
+                memcpy(new_string + prev_len + j * repeated_len, current_string, repeated_len);
+            }
+            new_string[new_len] = '\0'; // 手动添加字符串结束符
+
+            // 释放旧内存
+            free(prev_string);
+            free(current_string);
+
+            // 更新 current_string
+            current_string = new_string;
+            current_len = new_len;
+            current_capacity = new_len + 1;
+        }
+        else { // 是字母
+            append_char(&current_string, &current_len, &current_capacity, c);
+        }
+    }
+
+    // --- 清理和返回 ---
+    free(count_stack);
+    free(string_stack);
+    // current_string 是需要返回给调用者的，所以不能在这里 free
+    return current_string;
+}
+
+
+// --- 主函数 ---
+int main() {
+    printf("字符串解码器\n");
+    printf("编码规则: k[encoded_string]，表示 encoded_string 重复 k 次。\n");
+    printf("例如: 3[a]2[bc] -> aaabcbc\n");
+    printf("----------------------------------------\n");
+
+    // 循环，允许用户多次输入，直到输入空行
+    while (1) {
+        char* input_string = read_input_line();
+
+        // 如果读取失败（如内存不足）或用户输入了空行（直接回车），则退出循环
+        if (input_string == NULL) {
+            printf("程序结束。\n");
+            break;
+        }
+
+        printf("\n输入: \"%s\"\n", input_string);
+
+        char* result = decodeString(input_string);
+        if (result) {
+            printf("输出: \"%s\"\n", result);
+            free(result); // 释放解码结果字符串
+        }
+        else {
+            // 理论上 decodeString 内部出错会直接 exit，所以这里可能不会执行
+            printf("解码过程中发生错误。\n");
+        }
+
+        free(input_string); // 释放用户输入的字符串
+        printf("----------------------------------------\n");
+    }
+
+    return 0;
+}
